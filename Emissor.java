@@ -4,6 +4,9 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -15,7 +18,7 @@ public class Emissor {
     private static Timer timer;
     private static final int TIMEOUT_MS = 1000; // 1 segundo de timeout
 
-    private static ArrayList<Segmento> bufferPacotes = new ArrayList<>(); // Armazena os pacotes lidos do arquivo
+    private static ArrayList<Segmento> bufferPacotes = new ArrayList<>();
     
     // Estatísticas
     private static int pacotesEnviados = 0;
@@ -53,7 +56,7 @@ public class Emissor {
         socket.receive(ackPacket);
         System.out.println("ACK do Handshake recebido. Iniciando transferência de dados...");
 
-        // 2. Lê o arquivo inteiro e divide em pacotes de 1024 bytes
+        // 2. Lê o arquivo inteiro e divide em pacotes
         byte[] dadosPayload = new byte[1024];
         int bytesRead;
         int seqCounter = 0;
@@ -95,7 +98,6 @@ public class Emissor {
         long startTime = System.currentTimeMillis();
         
         while (base < totalPacotes) {
-            // Se houver espaço na janela e ainda tiver pacotes para enviar
             synchronized (Emissor.class) {
                 if (nextSeqNum < base + N && nextSeqNum < totalPacotes) {
                     Segmento seg = bufferPacotes.get(nextSeqNum);
@@ -108,11 +110,9 @@ public class Emissor {
                     nextSeqNum++;
                 }
             }
-            // Pequeno sleep para evitar busy-waiting extremo na CPU
             Thread.sleep(5); 
         }
 
-        // Aguarda a thread de recepção finalizar
         ackReceiver.join(2000); 
 
         // 5. Envia FIN e encerra
@@ -125,6 +125,19 @@ public class Emissor {
         double throughput = (file.length() / 1024.0) / tempoSegundos; // KB/s
 
         socket.close();
+
+        // === VERIFICAÇÃO DE INTEGRIDADE MD5 ===
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hash = md.digest(Files.readAllBytes(Paths.get(arquivoOrigem)));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            System.out.println("\n[VALIDAÇÃO] Hash MD5 do ficheiro original: " + sb.toString());
+        } catch (Exception e) {
+            System.out.println("Erro ao calcular MD5: " + e.getMessage());
+        }
 
         // Exibe estatísticas finais
         System.out.println("\n--- Estatísticas do Emissor ---");
@@ -140,7 +153,6 @@ public class Emissor {
         if (seg.tipo == 0) pacotesEnviados++;
     }
 
-    // Tratamento seguro de Timer para concorrência
     private static synchronized void iniciarTimer(DatagramSocket socket, InetAddress ipDestino, int portaDestino) {
         pararTimer();
         timer = new Timer();
@@ -150,7 +162,6 @@ public class Emissor {
                 synchronized (Emissor.class) {
                     System.out.println("!!! TIMEOUT !!! Retransmitindo janela a partir da base: " + base);
                     retransmissoes++;
-                    // Retransmite todos os pacotes da base até nextSeqNum - 1
                     try {
                         for (int i = base; i < nextSeqNum; i++) {
                             enviarSegmento(socket, bufferPacotes.get(i), ipDestino, portaDestino);
@@ -159,7 +170,6 @@ public class Emissor {
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
-                    // Reinicia o timer após retransmitir
                     iniciarTimer(socket, ipDestino, portaDestino);
                 }
             }

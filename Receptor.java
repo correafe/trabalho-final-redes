@@ -3,6 +3,9 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.Random;
 
 public class Receptor {
@@ -24,6 +27,7 @@ public class Receptor {
 
         InetAddress emissorAddress = null;
         int emissorPort = -1;
+        String pathArquivo = "";
 
         while (true) {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
@@ -38,10 +42,10 @@ public class Receptor {
                 String payload = new String(seg.dados, StandardCharsets.UTF_8);
                 String[] params = payload.split(";");
                 probPerda = Double.parseDouble(params[0]);
-                String pathDestino = params[1];
+                pathArquivo = params[1];
                 
-                fos = new FileOutputStream(pathDestino);
-                System.out.println("Handshake recebido. Arquivo: " + pathDestino + " | Prob. Perda: " + probPerda);
+                fos = new FileOutputStream(pathArquivo);
+                System.out.println("Handshake recebido. Arquivo: " + pathArquivo + " | Prob. Perda: " + probPerda);
                 
                 // Responde o Handshake (ACK)
                 enviarAck(socket, emissorAddress, emissorPort, -1);
@@ -78,6 +82,20 @@ public class Receptor {
                 System.out.println("Pacote FIN recebido. Encerrando transferência.");
                 enviarAck(socket, emissorAddress, emissorPort, seg.numSeq); // Confirma o FIN
                 if (fos != null) fos.close();
+                
+                // === VERIFICAÇÃO DE INTEGRIDADE MD5 ===
+                try {
+                    MessageDigest md = MessageDigest.getInstance("MD5");
+                    byte[] hash = md.digest(Files.readAllBytes(Paths.get(pathArquivo)));
+                    StringBuilder sb = new StringBuilder();
+                    for (byte b : hash) {
+                        sb.append(String.format("%02x", b));
+                    }
+                    System.out.println("\n[VALIDAÇÃO] Hash MD5 do ficheiro recebido: " + sb.toString());
+                } catch (Exception e) {
+                    System.out.println("Erro ao calcular MD5: " + e.getMessage());
+                }
+                
                 break;
             }
         }
