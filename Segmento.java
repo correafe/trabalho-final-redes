@@ -1,13 +1,13 @@
-import java.nio.ByteBuffer;
-import java.util.Arrays;
 
+import java.nio.ByteBuffer;
+ 
 public class Segmento {
     public byte tipo; // 0=DATA, 1=ACK, 2=HANDSHAKE, 3=FIN
     public int numSeq;
     public int numAck;
     public short tamanhoDados;
     public byte[] dados;
-
+ 
     public Segmento(byte tipo, int numSeq, int numAck, byte[] dados) {
         this.tipo = tipo;
         this.numSeq = numSeq;
@@ -15,7 +15,7 @@ public class Segmento {
         this.dados = dados;
         this.tamanhoDados = (dados != null) ? (short) dados.length : 0;
     }
-
+ 
     // Transforma o objeto em um array de bytes para envio via UDP
     public byte[] toByteArray() {
         int tamanhoTotal = 11 + (dados != null ? dados.length : 0);
@@ -29,7 +29,7 @@ public class Segmento {
         }
         return buffer.array();
     }
-
+ 
     // Reconstrói o objeto a partir de um array de bytes recebido via UDP
     public static Segmento fromByteArray(byte[] array, int length) {
         ByteBuffer buffer = ByteBuffer.wrap(array, 0, length);
@@ -37,7 +37,7 @@ public class Segmento {
         int numSeq = buffer.getInt();
         int numAck = buffer.getInt();
         short tamanhoDados = buffer.getShort();
-        
+ 
         byte[] dados = null;
         if (tamanhoDados > 0) {
             dados = new byte[tamanhoDados];
