@@ -1,0 +1,175 @@
+import java.io.File;
+import java.io.FileInputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Timer;
+import java.util.TimerTask;
+
+public class Emissor {
+    private static int base = 0;
+    private static int nextSeqNum = 0;
+    private static int N; // Tamanho da janela
+    private static Timer timer;
+    private static final int TIMEOUT_MS = 1000; // 1 segundo de timeout
+
+    private static ArrayList<Segmento> bufferPacotes = new ArrayList<>(); // Armazena os pacotes lidos do arquivo
+    
+    // Estatísticas
+    private static int pacotesEnviados = 0;
+    private static int retransmissoes = 0;
+    private static int acksRecebidos = 0;
+
+    public static void main(String[] args) throws Exception {
+        if (args.length < 4) {
+            System.out.println("Uso: java Emissor <arquivo_origem> <IP_destino>:<path_destino> <tamanho_janela> <prob_perda>");
+            return;
+        }
+
+        String arquivoOrigem = args[0];
+        String[] destino = args[1].split(":");
+        InetAddress ipDestino = InetAddress.getByName(destino[0]);
+        String pathDestino = destino[1];
+        N = Integer.parseInt(args[2]);
+        String probPerda = args[3];
+
+        int portaDestino = 5000;
+        DatagramSocket socket = new DatagramSocket();
+
+        File file = new File(arquivoOrigem);
+        FileInputStream fis = new FileInputStream(file);
+
+        // 1. Envia Handshake
+        String hsPayload = probPerda + ";" + pathDestino + ";" + file.length();
+        Segmento handshake = new Segmento((byte) 2, 0, 0, hsPayload.getBytes(StandardCharsets.UTF_8));
+        enviarSegmento(socket, handshake, ipDestino, portaDestino);
+        System.out.println("Handshake enviado. Aguardando ACK do handshake...");
+
+        // Aguarda ACK do Handshake de forma síncrona
+        byte[] ackBuffer = new byte[1035];
+        DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+        socket.receive(ackPacket);
+        System.out.println("ACK do Handshake recebido. Iniciando transferência de dados...");
+
+        // 2. Lê o arquivo inteiro e divide em pacotes de 1024 bytes
+        byte[] dadosPayload = new byte[1024];
+        int bytesRead;
+        int seqCounter = 0;
+        while ((bytesRead = fis.read(dadosPayload)) != -1) {
+            byte[] actualData = new byte[bytesRead];
+            System.arraycopy(dadosPayload, 0, actualData, 0, bytesRead);
+            bufferPacotes.add(new Segmento((byte) 0, seqCounter++, 0, actualData));
+        }
+        fis.close();
+        int totalPacotes = bufferPacotes.size();
+
+        // 3. Inicia Thread para receber ACKs concurrentemente
+        Thread ackReceiver = new Thread(() -> {
+            try {
+                while (base < totalPacotes) {
+                    DatagramPacket rcvPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+                    socket.receive(rcvPacket);
+                    Segmento ackSeg = Segmento.fromByteArray(rcvPacket.getData(), rcvPacket.getLength());
+                    
+                    if (ackSeg.tipo == 1) { // É um ACK
+                        acksRecebidos++;
+                        if (ackSeg.numAck >= base) {
+                            base = ackSeg.numAck + 1;
+                            System.out.println("ACK cumulativo recebido: " + ackSeg.numAck + " | Janela avançou, base agora é: " + base);
+                            pararTimer();
+                            if (base < nextSeqNum) {
+                                iniciarTimer(socket, ipDestino, portaDestino);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                if (!socket.isClosed()) e.printStackTrace();
+            }
+        });
+        ackReceiver.start();
+
+        // 4. Loop Principal (Janela Deslizante)
+        long startTime = System.currentTimeMillis();
+        
+        while (base < totalPacotes) {
+            // Se houver espaço na janela e ainda tiver pacotes para enviar
+            synchronized (Emissor.class) {
+                if (nextSeqNum < base + N && nextSeqNum < totalPacotes) {
+                    Segmento seg = bufferPacotes.get(nextSeqNum);
+                    enviarSegmento(socket, seg, ipDestino, portaDestino);
+                    System.out.println("Enviado pacote seq=" + nextSeqNum);
+                    
+                    if (base == nextSeqNum) {
+                        iniciarTimer(socket, ipDestino, portaDestino);
+                    }
+                    nextSeqNum++;
+                }
+            }
+            // Pequeno sleep para evitar busy-waiting extremo na CPU
+            Thread.sleep(5); 
+        }
+
+        // Aguarda a thread de recepção finalizar
+        ackReceiver.join(2000); 
+
+        // 5. Envia FIN e encerra
+        Segmento fin = new Segmento((byte) 3, nextSeqNum, 0, null);
+        enviarSegmento(socket, fin, ipDestino, portaDestino);
+        System.out.println("Arquivo transmitido. FIN enviado.");
+
+        long endTime = System.currentTimeMillis();
+        double tempoSegundos = (endTime - startTime) / 1000.0;
+        double throughput = (file.length() / 1024.0) / tempoSegundos; // KB/s
+
+        socket.close();
+
+        // Exibe estatísticas finais
+        System.out.println("\n--- Estatísticas do Emissor ---");
+        System.out.println("Total de pacotes enviados (incluindo retransmissões): " + pacotesEnviados);
+        System.out.println("Total de retransmissões (timeouts): " + retransmissoes);
+        System.out.println("Total de ACKs recebidos: " + acksRecebidos);
+        System.out.printf("Throughput estimado: %.2f KB/s\n", throughput);
+    }
+
+    private static void enviarSegmento(DatagramSocket socket, Segmento seg, InetAddress ip, int porta) throws Exception {
+        byte[] data = seg.toByteArray();
+        socket.send(new DatagramPacket(data, data.length, ip, porta));
+        if (seg.tipo == 0) pacotesEnviados++;
+    }
+
+    // Tratamento seguro de Timer para concorrência
+    private static synchronized void iniciarTimer(DatagramSocket socket, InetAddress ipDestino, int portaDestino) {
+        pararTimer();
+        timer = new Timer();
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                synchronized (Emissor.class) {
+                    System.out.println("!!! TIMEOUT !!! Retransmitindo janela a partir da base: " + base);
+                    retransmissoes++;
+                    // Retransmite todos os pacotes da base até nextSeqNum - 1
+                    try {
+                        for (int i = base; i < nextSeqNum; i++) {
+                            enviarSegmento(socket, bufferPacotes.get(i), ipDestino, portaDestino);
+                            System.out.println("Re-enviado pacote seq=" + i);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                    // Reinicia o timer após retransmitir
+                    iniciarTimer(socket, ipDestino, portaDestino);
+                }
+            }
+        }, TIMEOUT_MS);
+    }
+
+    private static synchronized void pararTimer() {
+        if (timer != null) {
+            timer.cancel();
+            timer = null;
+        }
+    }
+}
