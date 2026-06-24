@@ -6,7 +6,7 @@ Este projeto implementa a transferência confiável de dados utilizando o protoc
 - Java Development Kit (JDK) 8 ou superior instalado.
 
 ## Como Compilar
-Abra o terminal na pasta raiz do projeto (onde se encontram os ficheiros `.java`) e execute:
+Abra o terminal na pasta raiz do projeto e execute:
 \`\`\`bash
 javac *.java
 \`\`\`
