@@ -53,7 +53,10 @@ public class Receptor {
             }
  
             if (seg.tipo == 0) {
+                // Verifica se o pacote recebido é exatamente o próximo pacote esperado na sequência (garantia de entrega em ordem)
                 if (seg.numSeq == expectedSeqNum) {
+                    
+                    // Sorteia um valor de 0.0 a 1.0; se for menor que a probabilidade, simula a perda descartando o pacote (sem enviar ACK)
                     if (random.nextDouble() < probPerda) {
                         pacotesDescartados++;
                         System.out.println("SIMULAÇÃO DE PERDA: Pacote seq=" + seg.numSeq + " descartado.");
@@ -66,6 +69,7 @@ public class Receptor {
                     enviarAck(socket, emissorAddress, emissorPort, expectedSeqNum);
                     expectedSeqNum++;
                 } else {
+                    // Pacote fora de ordem: descarta os dados e reenvia o ACK cumulativo do último pacote aceito em ordem (expectedSeqNum - 1)
                     System.out.println("Fora de ordem seq=" + seg.numSeq
                             + " (esperado: " + expectedSeqNum + "). Reenviando último ACK.");
                     enviarAck(socket, emissorAddress, emissorPort, expectedSeqNum - 1);

@@ -20,6 +20,7 @@ public class Segmento {
     //Serializa o objeto Segmento em um array de bytes.
     //Prepara os dados de forma estruturada para transmissão via datagrama UDP.
     public byte[] toByteArray() {
+        // Cabeçalho de 11 bytes + payload útil
         int tamanhoTotal = 11 + (dados != null ? dados.length : 0);
         ByteBuffer buffer = ByteBuffer.allocate(tamanhoTotal);
         buffer.put(tipo);

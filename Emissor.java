@@ -80,11 +80,15 @@ public class Emissor {
                     if (ackSeg.tipo == 1) {
                         synchronized (Emissor.class) {
                             acksRecebidos++;
+                            
+                            // Se o ACK recebido for maior ou igual à base atual, avança a janela (característica do ACK cumulativo)
                             if (ackSeg.numAck >= base) {
                                 base = ackSeg.numAck + 1;
                                 System.out.println("ACK cumulativo recebido: " + ackSeg.numAck
                                         + " | Janela avançou, base agora é: " + base);
                                 pararTimer();
+                                
+                                // Se ainda há pacotes em trânsito (não confirmados), reinicia o temporizador para o novo pacote base
                                 if (base < nextSeqNum) {
                                     iniciarTimer(socket, ipDestino, portaDestino);
                                 }
@@ -102,11 +106,13 @@ public class Emissor {
  
         while (base < totalPacotes) {
             synchronized (Emissor.class) {
+                // Verifica se há espaço na janela deslizante (nextSeqNum dentro do limite N a partir da base e não ultrapassa o total de pacotes)
                 if (nextSeqNum < base + N && nextSeqNum < totalPacotes) {
                     Segmento seg = bufferPacotes.get(nextSeqNum);
                     enviarSegmento(socket, seg, ipDestino, portaDestino);
                     System.out.println("Enviado pacote seq=" + nextSeqNum);
  
+                    // Se este for o primeiro pacote do fluxo ou da nova janela, inicia o temporizador
                     if (base == nextSeqNum) {
                         iniciarTimer(socket, ipDestino, portaDestino);
                     }
@@ -169,6 +175,7 @@ public class Emissor {
                 synchronized (Emissor.class) {
                     System.out.println("!!! TIMEOUT !!! Retransmitindo janela a partir da base: " + base);
                     try {
+                        // Retransmite todos os pacotes da janela atual, começando do mais antigo não confirmado (base) até o último despachado (nextSeqNum - 1)
                         for (int i = base; i < nextSeqNum; i++) {
                             byte[] data = bufferPacotes.get(i).toByteArray();
                             socket.send(new DatagramPacket(data, data.length, ipDestino, portaDestino));
