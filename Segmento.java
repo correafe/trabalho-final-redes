@@ -1,13 +1,14 @@
-
 import java.nio.ByteBuffer;
  
 public class Segmento {
-    public byte tipo; // 0=DATA, 1=ACK, 2=HANDSHAKE, 3=FIN
+    public byte tipo;
     public int numSeq;
     public int numAck;
     public short tamanhoDados;
     public byte[] dados;
- 
+    
+    //Inicializa um novo segmento com os cabeçalhos do protocolo.
+    //O tamanho do payload (dados) é calculado automaticamente.
     public Segmento(byte tipo, int numSeq, int numAck, byte[] dados) {
         this.tipo = tipo;
         this.numSeq = numSeq;
@@ -15,8 +16,9 @@ public class Segmento {
         this.dados = dados;
         this.tamanhoDados = (dados != null) ? (short) dados.length : 0;
     }
- 
-    // Transforma o objeto em um array de bytes para envio via UDP
+    
+    //Serializa o objeto Segmento em um array de bytes.
+    //Prepara os dados de forma estruturada para transmissão via datagrama UDP.
     public byte[] toByteArray() {
         int tamanhoTotal = 11 + (dados != null ? dados.length : 0);
         ByteBuffer buffer = ByteBuffer.allocate(tamanhoTotal);
@@ -29,8 +31,9 @@ public class Segmento {
         }
         return buffer.array();
     }
- 
-    // Reconstrói o objeto a partir de um array de bytes recebido via UDP
+    
+    //Desserializa um array de bytes recebido da rede via UDP.
+    //Converte os bytes puros de volta para um objeto estruturado da classe Segmento.
     public static Segmento fromByteArray(byte[] array, int length) {
         ByteBuffer buffer = ByteBuffer.wrap(array, 0, length);
         byte tipo = buffer.get();
